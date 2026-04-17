@@ -160,4 +160,4 @@ Overrides: **`OPENAI_API_KEY`**, **`LLM_PROVIDER`**, **`OLLAMA_MODEL`**.
 
 ## License
 
-MIT (this repository). Third-party models (MusicGen, CLIP, Whisper weights, etc.) have their **own** terms—check each model card before commercial use.
+Samsung Research Bangladesh. Third-party models (MusicGen, CLIP, Whisper weights, etc.) have their **own** terms.
