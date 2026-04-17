@@ -1,0 +1,13 @@
+# Core — enough to run the full pipeline with Ollama (no CLIP/Whisper)
+moviepy>=2.0.0
+opencv-python>=4.9.0
+Pillow>=10.0.0
+numpy>=1.24.0
+pydantic>=2.0.0
+pyyaml>=6.0
+rich>=13.0.0
+httpx>=0.27.0
+scenedetect[opencv]>=0.6.0
+
+# Optional OpenAI provider (not needed if you only use Ollama)
+# openai>=1.30.0

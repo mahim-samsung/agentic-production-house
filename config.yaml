@@ -1,0 +1,75 @@
+llm:
+  # Provider: "openai" or "ollama"
+  provider: "ollama"
+
+  # OpenAI settings
+  openai:
+    api_key: ""  # Set via OPENAI_API_KEY env var
+    model: "gpt-4o"
+    base_url: "https://api.openai.com/v1"
+
+  # Ollama settings (local). Run: ollama pull llama3.2
+  ollama:
+    model: "llama3.2"
+    base_url: "http://localhost:11434"
+
+  temperature: 0.7
+  # Local models need headroom; CreativeBrief JSON was getting cut off mid-field below ~4k.
+  max_tokens: 8192
+
+media_analysis:
+  # CLIP model for visual understanding
+  clip_model: "ViT-B-32"
+  clip_pretrained: "openai"
+
+  # Number of frames to sample per video clip
+  frames_per_clip: 8
+
+  # Scene detection threshold (lower = more sensitive)
+  scene_threshold: 27.0
+
+  # Whisper model size: tiny, base, small, medium, large
+  whisper_model: "base"
+
+video:
+  # Output settings
+  output_fps: 30
+  output_resolution: [1920, 1080]
+  output_codec: "libx264"
+  output_format: "mp4"
+
+  # Default transition duration in seconds (crossfade overlap — higher = smoother)
+  transition_duration: 0.85
+
+  # Target duration range in seconds
+  min_duration: 15
+  max_duration: 90
+
+audio:
+  # Background music volume (0.0 to 1.0) under dialogue/ambient
+  music_volume: 0.18
+
+  # Fade in/out duration for audio in seconds
+  fade_duration: 1.5
+
+  # Sample rate
+  sample_rate: 44100
+
+# AI background music (Meta MusicGen via Hugging Face). Requires: pip install -r requirements-musicgen.txt
+# Strong GPU recommended (e.g. 12GB+ VRAM for facebook/musicgen-large in fp16).
+music_generation:
+  enabled: true
+  model: "facebook/musicgen-large"
+  # Shorter = faster; MusicGen is limited to ~30s per clip (looped under the full video)
+  max_seconds: 28
+  guidance_scale: 3.0
+  # auto | cuda | cpu
+  device: "auto"
+  # If true: try MusicGen first when enabled; if false: use files in assets/music first, then generate if none
+  prefer_over_library: true
+
+paths:
+  input_dir: "input"
+  output_dir: "output"
+  assets_dir: "assets"
+  temp_dir: ".tmp"
