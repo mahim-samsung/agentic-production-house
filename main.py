@@ -74,6 +74,20 @@ Examples:
         action="store_true",
         help="Synthesize instrumental BGM with MusicGen (needs: pip install -r requirements-musicgen.txt, GPU recommended)",
     )
+    parser.add_argument(
+        "--platform",
+        choices=[
+            "tiktok",
+            "youtube_long",
+            "youtube_shorts",
+            "youtube_highlights",
+            "vimeo_cinematic",
+            "instagram_reels",
+            "instagram_stories",
+        ],
+        default="youtube_long",
+        help="Target platform profile (default: youtube_long)",
+    )
 
     args = parser.parse_args()
 
@@ -123,6 +137,7 @@ Examples:
             media_dir=media_dir,
             media_files=media_files,
             output_filename=args.output,
+            platform=args.platform,
             music_dir=args.music_dir,
             skip_audio_enhance=args.no_audio,
             generate_music=args.generate_music,

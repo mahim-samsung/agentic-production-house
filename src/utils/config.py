@@ -35,6 +35,31 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
     if ollama_model := os.getenv("OLLAMA_MODEL"):
         _config.setdefault("llm", {}).setdefault("ollama", {})["model"] = ollama_model
 
+    if ollama_host := os.getenv("OLLAMA_BASE_URL"):
+        _config.setdefault("llm", {}).setdefault("ollama", {})["base_url"] = ollama_host.strip()
+
+    # Optional overrides (used by web UI / automation without editing YAML)
+    if (vision := os.getenv("VISION_BACKEND")) is not None:
+        _config.setdefault("media_analysis", {})["vision_backend"] = vision.strip()
+    if (wc := os.getenv("WRITER_CONSTRAINED")) is not None:
+        _config.setdefault("writer", {})["constrained"] = wc.strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+
+    if (mb := os.getenv("VIDEO_MOMENT_BACKEND")) is not None and mb.strip():
+        _config.setdefault("media_analysis", {})["video_moment_backend"] = mb.strip().lower()
+
+    if (ie := os.getenv("INTERNVIDEO2_ENABLED")) is not None:
+        _config.setdefault("media_analysis", {}).setdefault("internvideo2", {})["enabled"] = (
+            ie.strip().lower() in ("1", "true", "yes", "on")
+        )
+
+    if (im := os.getenv("INTERNVIDEO2_MODEL_ID")) is not None and im.strip():
+        _config.setdefault("media_analysis", {}).setdefault("internvideo2", {})["model_id"] = im.strip()
+
     return _config
 
 

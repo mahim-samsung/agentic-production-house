@@ -1,0 +1,50 @@
+:root {
+  --bg: #070708;
+  --bg-elevated: #0e0e10;
+  --surface: #131316;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --muted-2: #71717a;
+  --accent: #d4af37;
+  --accent-dim: rgba(212, 175, 55, 0.14);
+  --accent-glow: rgba(212, 175, 55, 0.22);
+  --success: #4ade80;
+  --danger: #f87171;
+  --radius: 14px;
+  --radius-sm: 10px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  background: radial-gradient(1200px 800px at 12% -10%, rgba(212, 175, 55, 0.06), transparent),
+    radial-gradient(900px 600px at 88% 0%, rgba(120, 140, 255, 0.05), transparent), var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+::selection {
+  background: var(--accent-dim);
+  color: var(--text);
+}

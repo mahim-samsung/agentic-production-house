@@ -20,3 +20,8 @@ venv/
 *.mp3
 .DS_Store
 .hf_cache/
+
+# Next.js web app
+web/node_modules/
+web/.next/
+web/.env.local

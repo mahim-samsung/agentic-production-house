@@ -25,13 +25,22 @@ from src.agents.director import DirectorAgent
 from src.agents.editor import EditorAgent
 from src.agents.writer import WriterAgent
 from src.core.llm import LLMClient
-from src.core.models import ProductionReport
+from src.core.models import ProductionReport, TransitionType
 from src.utils.config import get as cfg, load_config
 from src.utils.logger import console, get_logger
 
 log = get_logger("orchestrator")
 
 _MUSIC_EXT = {".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a"}
+_PLATFORM_PROMPT_HINTS = {
+    "tiktok": "Target platform: TikTok short-form vertical video. Strong hook in first 1-2 seconds, punchy pacing, mobile-safe overlays.",
+    "youtube_long": "Target platform: YouTube long-form. Prioritize coherent narrative flow, clarity, and sustained storytelling.",
+    "youtube_shorts": "Target platform: YouTube Shorts. Vertical, quick opening hook, retention-focused pacing.",
+    "youtube_highlights": "Target platform: YouTube highlights clip. Focus on strongest moments with clear context and payoff.",
+    "vimeo_cinematic": "Target platform: Vimeo cinematic delivery. Emphasize visual quality, smoother transitions, and filmic pacing.",
+    "instagram_reels": "Target platform: Instagram Reels. Vertical, expressive, polished pacing and caption-safe framing.",
+    "instagram_stories": "Target platform: Instagram Stories. Vertical segmented storytelling with concise beats and clear visual hierarchy.",
+}
 
 
 def _music_library_nonempty(path: Path) -> bool:
@@ -61,6 +70,7 @@ class ProductionOrchestrator:
         media_dir: Optional[str | Path] = None,
         media_files: Optional[list[str | Path]] = None,
         output_filename: str = "final_video.mp4",
+        platform: str = "youtube_long",
         music_dir: Optional[str | Path] = None,
         skip_audio_enhance: bool = False,
         generate_music: bool = False,
@@ -73,6 +83,7 @@ class ProductionOrchestrator:
             media_dir: Directory containing media files.
             media_files: Explicit list of media file paths.
             output_filename: Name for the output video.
+            platform: Platform profile to optimize for (e.g. tiktok, youtube_shorts).
             music_dir: Directory with background music files.
             skip_audio_enhance: Skip the audio enhancement step.
             generate_music: If True (or music_generation.enabled in config), synthesize BGM with MusicGen.
@@ -84,9 +95,24 @@ class ProductionOrchestrator:
         console.rule("[bold cyan]AGENTIC PRODUCTION HOUSE[/]")
         console.print(f"[bold]Prompt:[/] {prompt}\n")
 
+        platform_cfg = cfg(f"platforms.{platform}", {}) or {}
+        profile_name = platform_cfg.get("name", platform)
+        platform_prompt = _PLATFORM_PROMPT_HINTS.get(platform, "")
+        guided_prompt = prompt if not platform_prompt else f"{prompt}\n\n{platform_prompt}"
+        console.print(f"[bold]Platform:[/] {profile_name}")
+        console.print()
+
         # ----- Step 1: Director -----
         console.rule("[bold magenta]Step 1 · Director[/]")
-        brief = self.director.run(prompt)
+        brief = self.director.run(guided_prompt)
+        if "target_duration" in platform_cfg:
+            brief.target_duration = float(platform_cfg["target_duration"])
+        if "transition_preference" in platform_cfg:
+            brief.transition_preference = TransitionType(platform_cfg["transition_preference"])
+        style_hint = platform_cfg.get("style_hint", "")
+        if style_hint:
+            existing = brief.style_notes.strip()
+            brief.style_notes = f"{existing} | {style_hint}" if existing else style_hint
         console.print(f"  Title: [bold]{brief.title}[/]")
         console.print(f"  Mood: {brief.mood.value} | Pacing: {brief.pacing.value}")
         console.print(f"  Target: {brief.target_duration}s | Structure: {brief.structure}")
@@ -126,6 +152,7 @@ class ProductionOrchestrator:
 
         # ----- Step 4: Editor -----
         console.rule("[bold magenta]Step 4 · Editor[/]")
+        self.editor.apply_render_profile(platform_cfg)
         video_path = self.editor.run(edl, output_filename)
         console.print(f"  Assembled: {video_path}")
         console.print()
@@ -187,7 +214,10 @@ class ProductionOrchestrator:
         report = ProductionReport(
             output_path=str(final_path),
             duration=edl.total_duration,
-            resolution=f"{cfg('video.output_resolution', [1920,1080])[0]}x{cfg('video.output_resolution', [1920,1080])[1]}",
+            resolution=(
+                f"{platform_cfg.get('output_resolution', cfg('video.output_resolution', [1920,1080]))[0]}x"
+                f"{platform_cfg.get('output_resolution', cfg('video.output_resolution', [1920,1080]))[1]}"
+            ),
             creative_brief=brief,
             edit_decision_list=edl,
             media_profiles=profiles,

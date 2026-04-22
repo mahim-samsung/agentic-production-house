@@ -2,15 +2,10 @@ llm:
   # Provider: "openai" or "ollama"
   provider: "ollama"
 
-  # OpenAI settings
-  openai:
-    api_key: ""  # Set via OPENAI_API_KEY env var
-    model: "gpt-4o"
-    base_url: "https://api.openai.com/v1"
-
-  # Ollama settings (local). Run: ollama pull llama3.2
+  # Ollama settings (local). Use a model you have pulled (`ollama list`); e.g. ollama pull llama3.3:70b
+  # base_url is the server root only (no /v1); OpenAI-compatible path is added in code.
   ollama:
-    model: "llama3.2"
+    model: "llama3.3:70b"
     base_url: "http://localhost:11434"
 
   temperature: 0.7
@@ -18,28 +13,48 @@ llm:
   max_tokens: 8192
 
 media_analysis:
-  # CLIP model for visual understanding
-  clip_model: "ViT-B-32"
-  clip_pretrained: "openai"
+  # Device: auto | cuda | cpu
+  device: "auto"
+
+  # Vision backend: open_clip | siglip2
+  vision_backend: "siglip2"
+
+  # OpenCLIP fallback backend
+  clip_model: "ViT-bigG-14"
+  clip_pretrained: "laion2b_s39b_b160k"
+
+  # SigLIP2 primary backend (Transformers)
+  siglip2:
+    model_id: "google/siglip2-base-patch16-224"
 
   # Number of frames to sample per video clip
-  frames_per_clip: 8
+  frames_per_clip: 24
 
   # Scene detection threshold (lower = more sensitive)
   scene_threshold: 27.0
 
+  # Key-moment scoring backend: heuristic | internvideo2
+  video_moment_backend: "internvideo2"
+  internvideo2:
+    model_id: "OpenGVLab/InternVideo2_Chat_8B_InternLM2_5"
+    enabled: true
+
   # Whisper model size: tiny, base, small, medium, large
-  whisper_model: "base"
+  whisper_backend: "faster-whisper"  # faster-whisper | openai-whisper
+  whisper_model: "large-v3"
+  whisper_compute_type: "float16"
+  whisper_beam_size: 5
+  whisper_vad_filter: true
 
 video:
   # Output settings
   output_fps: 30
-  output_resolution: [1920, 1080]
+  output_resolution: [3840, 2160]
   output_codec: "libx264"
   output_format: "mp4"
 
   # Default transition duration in seconds (crossfade overlap — higher = smoother)
-  transition_duration: 0.85
+  transition_duration: 1.0
 
   # Target duration range in seconds
   min_duration: 15
@@ -54,6 +69,13 @@ audio:
 
   # Sample rate
   sample_rate: 44100
+
+writer:
+  # When true, the LLM may only choose pre-validated segment candidates (paths + time windows).
+  constrained: true
+  max_candidates_per_asset: 20
+  min_video_segment_seconds: 0.75
+  image_segment_seconds: 4.5
 
 # AI background music (Meta MusicGen via Hugging Face). Requires: pip install -r requirements-musicgen.txt
 # Strong GPU recommended (e.g. 12GB+ VRAM for facebook/musicgen-large in fp16).
@@ -73,3 +95,74 @@ paths:
   output_dir: "output"
   assets_dir: "assets"
   temp_dir: ".tmp"
+
+platforms:
+  tiktok:
+    name: "TikTok"
+    target_duration: 25
+    output_resolution: [1080, 1920]
+    output_fps: 30
+    output_codec: "libx264"
+    transition_preference: "cut"
+    transition_duration: 0.45
+    style_hint: "Vertical framing, fast hook, short punchy segments, bold subtitles."
+
+  youtube_long:
+    name: "YouTube Long-form"
+    target_duration: 75
+    output_resolution: [1920, 1080]
+    output_fps: 30
+    output_codec: "libx264"
+    transition_preference: "crossfade"
+    transition_duration: 0.85
+    style_hint: "Narrative continuity, balanced pacing, chapter-friendly structure."
+
+  youtube_shorts:
+    name: "YouTube Shorts"
+    target_duration: 35
+    output_resolution: [1080, 1920]
+    output_fps: 30
+    output_codec: "libx264"
+    transition_preference: "cut"
+    transition_duration: 0.5
+    style_hint: "Immediate hook, high retention pacing, concise storytelling."
+
+  youtube_highlights:
+    name: "YouTube Highlights"
+    target_duration: 45
+    output_resolution: [1920, 1080]
+    output_fps: 30
+    output_codec: "libx264"
+    transition_preference: "crossfade"
+    transition_duration: 0.65
+    style_hint: "Prioritize peak moments with clear setup and payoff."
+
+  vimeo_cinematic:
+    name: "Vimeo Cinematic"
+    target_duration: 70
+    output_resolution: [3840, 2160]
+    output_fps: 24
+    output_codec: "libx264"
+    transition_preference: "crossfade"
+    transition_duration: 1.0
+    style_hint: "Cinematic rhythm, smooth transitions, quality-first composition."
+
+  instagram_reels:
+    name: "Instagram Reels"
+    target_duration: 30
+    output_resolution: [1080, 1920]
+    output_fps: 30
+    output_codec: "libx264"
+    transition_preference: "cut"
+    transition_duration: 0.5
+    style_hint: "Vertical social pacing, polished visuals, mobile-safe text layout."
+
+  instagram_stories:
+    name: "Instagram Stories"
+    target_duration: 20
+    output_resolution: [1080, 1920]
+    output_fps: 30
+    output_codec: "libx264"
+    transition_preference: "cut"
+    transition_duration: 0.45
+    style_hint: "Short segmented beats, clear message hierarchy, story-safe framing."

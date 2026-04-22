@@ -22,6 +22,14 @@ log = get_logger("llm")
 T = TypeVar("T", bound=BaseModel)
 
 
+def _ollama_openai_base_url(host: str) -> str:
+    """Ollama OpenAI-compatible calls use base …/v1 + POST /chat/completions."""
+    h = host.strip().rstrip("/")
+    if h.lower().endswith("/v1"):
+        h = h[:-3].rstrip("/")
+    return f"{h}/v1"
+
+
 class LLMClient:
     """Thin wrapper that talks to any OpenAI-compatible chat endpoint."""
 
@@ -41,7 +49,7 @@ class LLMClient:
         else:
             self.model = model or cfg("llm.ollama.model", "llama3.1:8b")
             ollama_host = base_url or cfg("llm.ollama.base_url", "http://localhost:11434")
-            self.base_url = f"{ollama_host.rstrip('/')}/v1"
+            self.base_url = _ollama_openai_base_url(ollama_host)
             self.api_key = "ollama"
 
         self.temperature = cfg("llm.temperature", 0.7)
@@ -68,7 +76,27 @@ class LLMClient:
 
         log.debug(f"LLM request → {self.provider}/{self.model}")
         resp = self._client.post("/chat/completions", json=payload)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404 and self.provider != "openai":
+                body = ""
+                try:
+                    body = (e.response.text or "")[:400]
+                except Exception:
+                    pass
+                hint = (
+                    f"Ollama returned HTTP 404 for {e.request.url!s}. "
+                    f"Model in use: {self.model!r}. "
+                    "Fixes: (1) `ollama pull " + self.model + "` so that tag exists; "
+                    "(2) upgrade Ollama — OpenAI-compatible /v1/chat/completions needs a current release; "
+                    "(3) set llm.ollama.base_url / OLLAMA_BASE_URL to the API host only, e.g. "
+                    "http://127.0.0.1:11434 (not …/v1 or …/chat/completions)."
+                )
+                if body.strip():
+                    hint += f" Response: {body.strip()!r}"
+                raise httpx.HTTPStatusError(hint, request=e.request, response=e.response) from e
+            raise
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
         return content

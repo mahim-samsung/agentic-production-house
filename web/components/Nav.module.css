@@ -1,0 +1,35 @@
+.nav {
+  max-width: min(800px, calc(100vw - 2.5rem));
+  margin: 0 auto 1rem;
+  padding: 1.35rem 1.25rem 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text);
+  text-decoration: none;
+}
+.brand:hover {
+  text-decoration: none;
+  color: var(--accent);
+}
+
+.links {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.88rem;
+}
+
+.links a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.links a:hover {
+  color: var(--text);
+  text-decoration: none;
+}

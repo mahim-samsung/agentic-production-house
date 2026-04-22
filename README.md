@@ -1,160 +1,70 @@
 # Agentic Production House
 
-Turn **your** video clips and images plus a **text prompt** into a single edited video (about **15–90 seconds**), with pacing, transitions, optional background music, and a JSON **production report** that explains the edit plan.
-
----
+Turn **your** clips and images plus a **prompt** into one edited video (with optional music) and a JSON **production report**.
 
 ## How it works
 
-An **orchestrator** runs a fixed pipeline. **Reasoning** (LLM + structured JSON) is separate from **execution** (MoviePy / FFmpeg).
+One pipeline: **Director** (brief from LLM) → **Analyst** (frames, scenes, speech, scores) → **Writer** (picks only **pre-validated** segments so trims stay real) → **Editor** (MoviePy/FFmpeg) → **Audio** (normalize, music / optional MusicGen).
 
-```mermaid
-flowchart TD
-    subgraph INPUT["Input"]
-        P[User prompt]
-        M[Media files]
-    end
+**Example (travel footage)**
 
-    P --> O[Orchestrator]
-    M --> O
+Put your clips in **`input/`** (airport, train, city walks, food, sunset — order does not matter; the edit plan orders them).
 
-    O --> D["1 · Director — LLM → creative brief"]
-    D --> A["2 · Analyst — CLIP, scene cuts, Whisper, LLM → media profiles"]
-    M --> A
-
-    A --> W["3 · Writer — LLM → edit decision list"]
-    D --> W
-
-    W --> E["4 · Editor — trim, order, transitions → video"]
-    M --> E
-
-    E --> U["5 · Audio — normalize, fades, library or MusicGen BGM"]
-    D --> U
-    W --> U
-
-    U --> OUT["Output — final MP4 + production_report.json"]
+```bash
+python main.py --prompt "One-day travel film: leave home, journey, explore the city, golden hour, quiet ending. Calm pacing, about 45 seconds." --media-dir ./input --platform vimeo_cinematic
 ```
 
-1. **Director** — Reads your prompt with an LLM and outputs a creative brief (mood, pacing, structure, target length).
-2. **Analyst** — Profiles each file: optional **CLIP** on sampled frames, **scene detection**, optional **Whisper** on audio, then an LLM summary and relevance score.
-3. **Writer** — LLM builds an **edit decision list** (which file, in/out times, transitions, short reasoning).
-4. **Editor** — Cuts and assembles the video with **MoviePy** / **FFmpeg** (no new footage—only your media).
-5. **Audio** — Loudness normalization, fades, optional **your** music from a folder, or optional **MusicGen**-synthesized underscore if enabled.
+Shorter social cut from the same folder:
 
-*(If the diagram does not render, use a Markdown viewer or GitHub that supports **Mermaid**.)*
+```bash
+python main.py --prompt "Travel hype: trains, streets, skyline, one beat per shot, high energy, ~25s" --media-dir ./input --platform tiktok
+```
 
----
-
-## What you need
-
-- **Python 3.9+** (3.10+ recommended)
-- **FFmpeg** on your `PATH` (e.g. `brew install ffmpeg` on macOS)
-- **LLM**: **[Ollama](https://ollama.com)** locally (default) **or** OpenAI-compatible API
-- **GPU**: Optional but strongly recommended for CLIP, Whisper, and MusicGen
+Use **`--media clip1.mp4 clip2.jpg …`** instead of **`--media-dir`** when you want an explicit file list. **`--platform`** picks presets in **`config.yaml`** → **`platforms`** (TikTok, YouTube, Reels, etc.).
 
 ---
 
-## Setup
-
-### 1. Environment and core dependencies
+## Run (CLI)
 
 ```bash
 cd agentic-production-house
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -U pip
-pip install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -U pip && pip install -r requirements.txt
 ```
 
-Optional one-liner (creates `.venv`, installs core, pulls the Ollama model from `config.yaml`):
+**Ollama** (default LLM): install [Ollama](https://ollama.com), then pull the model in `config.yaml` (`llm.ollama.model`), e.g. `ollama pull llama3.3:70b`. Optional ML stack: `pip install -r requirements-ml.txt` and `python scripts/verify_ml.py`.
+
+**FFmpeg** on `PATH` (e.g. `brew install ffmpeg`).
 
 ```bash
-./scripts/bootstrap.sh             # add --ml to also install CLIP + Whisper stack
+python main.py --prompt "Your idea here" --media-dir ./input
 ```
 
-### 2. Ollama (default)
-
-Install and start **Ollama**, then pull the model named in **`config.yaml`** (`llm.ollama.model`, e.g. `llama3.2`):
-
-```bash
-ollama pull llama3.2
-```
-
-Check: `python scripts/check_env.py` (FFmpeg, Ollama, Python packages).
-
-### 3. OpenAI instead
-
-```bash
-export OPENAI_API_KEY="sk-..."
-export LLM_PROVIDER="openai"
-```
-
-Or set `llm.provider: openai` in **`config.yaml`**.
-
-### 4. Richer clip understanding (optional)
-
-```bash
-pip install -r requirements-ml.txt
-python scripts/verify_ml.py      # first CLIP run may download weights
-```
-
-### 5. AI background music (optional)
-
-Uses **Meta MusicGen** (see model card for **license**, often non-commercial). Needs a capable GPU for practical speed.
-
-```bash
-pip install -r requirements-musicgen.txt
-```
-
-In **`config.yaml`**, set `music_generation.enabled: true`, **or** pass **`--generate-music`** on the CLI. Put your **own** tracks in **`assets/music`** or pass **`--music-dir`** if you are not using generation.
+Common flags: `--platform …`, `--output name.mp4`, `--music-dir ./music`, `--generate-music`, `--no-audio`, `--config /path/to/config.yaml`. Check: `python scripts/check_env.py`.
 
 ---
 
-## Run
+## Run (Web UI)
 
-Put media in **`input/`** or point to another folder.
+Install front-end deps once (they live under **`web/`**):
 
 ```bash
-source .venv/bin/activate
-
-python main.py --prompt "Relaxing travel vlog, journey start to end" --media-dir ./input
+cd web && npm install
 ```
 
-**Useful flags**
+Then either stay in **`web/`** and run **`npm run dev`**, or from the **repo root** run **`npm run dev`** (root `package.json` forwards into `web/`).
 
-| Flag | Purpose |
-|------|--------|
-| `--media FILE …` | Explicit list of clips/images instead of a directory |
-| `--output NAME` | Output filename under `output/` (default `final_video.mp4`) |
-| `--music-dir DIR` | Royalty-free / your music to mix under the edit |
-| `--generate-music` | Synthesize BGM with MusicGen (if installed) |
-| `--no-audio` | Skip normalization / music pass |
-| `--config PATH` | Alternate `config.yaml` |
-
-**Programmatic**
-
-```python
-from src.orchestrator import ProductionOrchestrator
-
-orch = ProductionOrchestrator()
-report = orch.produce(
-    prompt="Product promo, clean and modern",
-    media_dir="./input",
-    output_filename="promo.mp4",
-)
-print(report.output_path, report.duration)
-orch.close()
+```bash
+npm run dev
 ```
 
-Outputs: **`output/final_video.mp4`** (or your `--output` name) and **`output/production_report.json`**.
+Open **http://localhost:3000** — **Produce** to run jobs; **Admin** for Ollama URL/model, vision, moment backend, `config.yaml` path (saved in the browser). Details: **`web/README.md`**.
 
 ---
 
 ## Configuration
 
-Most behavior is controlled in **`config.yaml`**: LLM provider and **`max_tokens`**, CLIP/Whisper settings, video resolution and transitions, audio levels, MusicGen model and toggles.
-
-Overrides: **`OPENAI_API_KEY`**, **`LLM_PROVIDER`**, **`OLLAMA_MODEL`**.
+Defaults live in **`config.yaml`** (LLM, `media_analysis`, `video`, `platforms`, `writer`, MusicGen, paths). Env overrides include `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, `VISION_BACKEND`, `VIDEO_MOMENT_BACKEND`, `INTERNVIDEO2_*`, `WRITER_CONSTRAINED`, `LLM_PROVIDER`, `OPENAI_API_KEY`.
 
 ---
 

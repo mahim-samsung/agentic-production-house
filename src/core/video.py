@@ -45,6 +45,23 @@ class VideoAssembler:
         self.codec: str = cfg("video.output_codec", "libx264")
         self.default_transition: float = cfg("video.transition_duration", 0.5)
 
+    def apply_profile(self, profile: dict) -> None:
+        """Apply render overrides from a platform profile."""
+        if not profile:
+            return
+
+        if "output_fps" in profile:
+            self.output_fps = int(profile["output_fps"])
+        if "output_resolution" in profile:
+            res = profile["output_resolution"]
+            if isinstance(res, list) and len(res) == 2:
+                self.output_width = int(res[0])
+                self.output_height = int(res[1])
+        if "output_codec" in profile:
+            self.codec = str(profile["output_codec"])
+        if "transition_duration" in profile:
+            self.default_transition = float(profile["transition_duration"])
+
     def assemble(
         self,
         edl: EditDecisionList,

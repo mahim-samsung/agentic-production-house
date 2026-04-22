@@ -41,6 +41,33 @@ _clip_model = None
 _clip_preprocess = None
 _clip_tokenizer = None
 _whisper_model = None
+_whisper_backend: str | None = None
+_siglip2_model = None
+_siglip2_processor = None
+_internvideo_model = None
+_internvideo_processor = None
+
+
+def _infer_device() -> str:
+    try:
+        import torch
+
+        configured = str(cfg("media_analysis.device", "auto")).lower()
+        if configured in {"cuda", "cpu"}:
+            return configured
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
+
+
+def _move_batch_to_device(batch: dict, device: str) -> dict:
+    moved = {}
+    for k, v in batch.items():
+        if hasattr(v, "to"):
+            moved[k] = v.to(device)
+        else:
+            moved[k] = v
+    return moved
 
 
 def _load_clip():
@@ -54,7 +81,7 @@ def _load_clip():
 
         model_name = cfg("media_analysis.clip_model", "ViT-B-32")
         pretrained = cfg("media_analysis.clip_pretrained", "openai")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = _infer_device()
 
         log.info(f"Loading CLIP model {model_name} ({pretrained}) on {device}")
         _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
@@ -69,18 +96,92 @@ def _load_clip():
         log.warning(f"Failed to load CLIP: {e}")
 
 
+def _load_siglip2():
+    global _siglip2_model, _siglip2_processor
+    if _siglip2_model is not None and _siglip2_processor is not None:
+        return
+
+    try:
+        from transformers import AutoModel, AutoProcessor
+
+        model_id = cfg("media_analysis.siglip2.model_id", "google/siglip2-base-patch16-224")
+        device = _infer_device()
+
+        log.info(f"Loading SigLIP2 model {model_id} on {device}")
+        _siglip2_processor = AutoProcessor.from_pretrained(model_id)
+        _siglip2_model = AutoModel.from_pretrained(model_id)
+        if hasattr(_siglip2_model, "to"):
+            _siglip2_model = _siglip2_model.to(device).eval()
+        log.info("SigLIP2 model loaded")
+    except ImportError:
+        log.warning("transformers not installed — SigLIP2 analysis disabled")
+    except Exception as e:
+        log.warning(f"Failed to load SigLIP2: {e}")
+
+
+def _load_internvideo2():
+    global _internvideo_model, _internvideo_processor
+    if _internvideo_model is not None and _internvideo_processor is not None:
+        return
+
+    if not bool(cfg("media_analysis.internvideo2.enabled", False)):
+        return
+
+    try:
+        from transformers import AutoModel, AutoProcessor
+
+        model_id = cfg("media_analysis.internvideo2.model_id", "")
+        if not model_id:
+            return
+
+        device = _infer_device()
+        log.info(f"Loading InternVideo2 model {model_id} on {device}")
+        _internvideo_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+        _internvideo_model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
+        if hasattr(_internvideo_model, "to"):
+            _internvideo_model = _internvideo_model.to(device).eval()
+        log.info("InternVideo2 model loaded")
+    except Exception as e:
+        log.warning(f"InternVideo2 disabled (load failed): {e}")
+
+
 def _load_whisper():
-    global _whisper_model
+    global _whisper_model, _whisper_backend
     if _whisper_model is not None:
         return
+
+    model_size = cfg("media_analysis.whisper_model", "large-v3")
+    backend = str(cfg("media_analysis.whisper_backend", "faster-whisper")).lower()
+    device = _infer_device()
+
+    if backend == "faster-whisper":
+        try:
+            from faster_whisper import WhisperModel
+
+            compute_type = cfg(
+                "media_analysis.whisper_compute_type",
+                "float16" if device == "cuda" else "int8",
+            )
+            log.info(
+                f"Loading faster-whisper model ({model_size}) on {device} "
+                f"[compute_type={compute_type}]"
+            )
+            _whisper_model = WhisperModel(model_size, device=device, compute_type=compute_type)
+            _whisper_backend = "faster-whisper"
+            log.info("faster-whisper model loaded")
+            return
+        except ImportError:
+            log.warning("faster-whisper not installed — trying openai-whisper fallback")
+        except Exception as e:
+            log.warning(f"Failed to load faster-whisper: {e}; trying openai-whisper fallback")
 
     try:
         import whisper
 
-        model_size = cfg("media_analysis.whisper_model", "base")
-        log.info(f"Loading Whisper model ({model_size})")
-        _whisper_model = whisper.load_model(model_size)
-        log.info("Whisper model loaded")
+        log.info(f"Loading openai-whisper model ({model_size})")
+        _whisper_model = whisper.load_model(model_size, device=device)
+        _whisper_backend = "openai-whisper"
+        log.info("openai-whisper model loaded")
     except ImportError:
         log.warning("openai-whisper not installed — transcription disabled")
     except Exception as e:
@@ -138,6 +239,12 @@ def _analyze_video(path: Path, file_size_mb: float) -> MediaProfile:
     frame_analyses = _analyze_frames(sampled_frames)
     scenes = _detect_scenes(path)
     audio = _analyze_audio(path)
+    scenes = _score_scene_relevance(
+        scenes=scenes,
+        frames=frame_analyses,
+        audio=audio,
+        media_path=path,
+    )
 
     return MediaProfile(
         file_path=str(path),
@@ -216,67 +323,116 @@ def _extract_key_frames(
 
 
 def _analyze_frames(frames: list[tuple[float, Image.Image]]) -> list[FrameAnalysis]:
-    """Analyze frames using CLIP to generate descriptions and tags."""
-    _load_clip()
+    """Analyze frames using configured vision backend."""
+    backend = str(cfg("media_analysis.vision_backend", "open_clip")).lower()
+    if backend == "siglip2":
+        analyzed = _analyze_frames_siglip2(frames)
+        if analyzed:
+            return analyzed
+        log.warning("SigLIP2 unavailable, falling back to OpenCLIP")
 
+    analyzed = _analyze_frames_open_clip(frames)
+    if analyzed:
+        return analyzed
+
+    return [
+        FrameAnalysis(
+            timestamp=ts,
+            description="(vision model not available)",
+            tags=[],
+            motion_level=0.0,
+        )
+        for ts, _ in frames
+    ]
+
+
+def _analyze_frames_open_clip(frames: list[tuple[float, Image.Image]]) -> list[FrameAnalysis]:
+    _load_clip()
     if _clip_model is None:
-        return [
-            FrameAnalysis(
-                timestamp=ts,
-                description="(CLIP not available)",
-                tags=[],
-            )
-            for ts, _ in frames
-        ]
+        return []
 
     import torch
-    device = next(_clip_model.parameters()).device
-    tag_candidates = [
-        "landscape", "cityscape", "beach", "mountain", "forest", "sunset", "sunrise",
-        "indoor", "outdoor", "people", "crowd", "portrait", "close-up", "wide-shot",
-        "action", "still", "food", "animal", "car", "building", "water", "sky",
-        "night", "day", "celebration", "wedding", "party", "sport", "nature",
-        "technology", "product", "art", "music", "dance", "travel", "work",
-    ]
-    emotion_candidates = [
-        "happy", "calm", "excited", "sad", "dramatic", "peaceful",
-        "energetic", "romantic", "nostalgic", "neutral",
-    ]
 
+    device = next(_clip_model.parameters()).device
+    tag_candidates, emotion_candidates = _label_candidates()
     tag_tokens = _clip_tokenizer(tag_candidates).to(device)
     emotion_tokens = _clip_tokenizer(emotion_candidates).to(device)
 
     results = []
     with torch.no_grad():
+        tag_features = _clip_model.encode_text(tag_tokens)
+        tag_features /= tag_features.norm(dim=-1, keepdim=True)
+        emo_features = _clip_model.encode_text(emotion_tokens)
+        emo_features /= emo_features.norm(dim=-1, keepdim=True)
+
+        prev_gray = None
         for timestamp, img in frames:
             img_tensor = _clip_preprocess(img).unsqueeze(0).to(device)
             img_features = _clip_model.encode_image(img_tensor)
             img_features /= img_features.norm(dim=-1, keepdim=True)
 
-            # Tag scoring
-            tag_features = _clip_model.encode_text(tag_tokens)
-            tag_features /= tag_features.norm(dim=-1, keepdim=True)
             tag_scores = (img_features @ tag_features.T).squeeze().cpu().numpy()
-            top_tag_idx = tag_scores.argsort()[-5:][::-1]
-            top_tags = [tag_candidates[i] for i in top_tag_idx]
-
-            # Emotion scoring
-            emo_features = _clip_model.encode_text(emotion_tokens)
-            emo_features /= emo_features.norm(dim=-1, keepdim=True)
             emo_scores = (img_features @ emo_features.T).squeeze().cpu().numpy()
-            dominant_emotion = emotion_candidates[emo_scores.argmax()]
+            top_tags, dominant_emotion, quality = _postprocess_label_scores(
+                tag_scores, emo_scores, tag_candidates, emotion_candidates
+            )
+            motion_level, prev_gray = _calc_motion(img, prev_gray)
 
-            # Quality heuristic based on CLIP confidence spread
-            quality = float(np.clip(tag_scores.max() * 3.0, 0.0, 1.0))
+            results.append(
+                FrameAnalysis(
+                    timestamp=round(timestamp, 2),
+                    description=f"Scene with: {', '.join(top_tags[:3])}",
+                    tags=top_tags,
+                    emotion=dominant_emotion,
+                    visual_quality=round(quality, 2),
+                    motion_level=round(motion_level, 2),
+                )
+            )
+    return results
 
-            results.append(FrameAnalysis(
-                timestamp=round(timestamp, 2),
-                description=f"Scene with: {', '.join(top_tags[:3])}",
-                tags=top_tags,
-                emotion=dominant_emotion,
-                visual_quality=round(quality, 2),
-            ))
 
+def _analyze_frames_siglip2(frames: list[tuple[float, Image.Image]]) -> list[FrameAnalysis]:
+    _load_siglip2()
+    if _siglip2_model is None or _siglip2_processor is None:
+        return []
+
+    import torch
+
+    device = _infer_device()
+    tag_candidates, emotion_candidates = _label_candidates()
+    all_labels = tag_candidates + emotion_candidates
+    results = []
+    prev_gray = None
+
+    with torch.no_grad():
+        for timestamp, img in frames:
+            batch = _siglip2_processor(
+                images=img,
+                text=all_labels,
+                return_tensors="pt",
+                padding=True,
+            )
+            batch = _move_batch_to_device(batch, device)
+            out = _siglip2_model(**batch)
+            logits = out.logits_per_image[0].detach().float().cpu().numpy()
+
+            tag_scores = logits[: len(tag_candidates)]
+            emo_scores = logits[len(tag_candidates) :]
+            top_tags, dominant_emotion, quality = _postprocess_label_scores(
+                tag_scores, emo_scores, tag_candidates, emotion_candidates
+            )
+            motion_level, prev_gray = _calc_motion(img, prev_gray)
+
+            results.append(
+                FrameAnalysis(
+                    timestamp=round(timestamp, 2),
+                    description=f"Scene with: {', '.join(top_tags[:3])}",
+                    tags=top_tags,
+                    emotion=dominant_emotion,
+                    visual_quality=round(quality, 2),
+                    motion_level=round(motion_level, 2),
+                )
+            )
     return results
 
 
@@ -317,6 +473,103 @@ def _detect_scenes(path: Path) -> list[SceneSegment]:
 
 
 # ---------------------------------------------------------------------------
+# Key-moment scoring
+# ---------------------------------------------------------------------------
+
+def _score_scene_relevance(
+    scenes: list[SceneSegment],
+    frames: list[FrameAnalysis],
+    audio: Optional[AudioProfile],
+    media_path: Path,
+) -> list[SceneSegment]:
+    if not scenes:
+        return scenes
+
+    # Strong default heuristic: combine visual quality, motion, and speech presence.
+    for s in scenes:
+        in_scene = [f for f in frames if s.start_time <= f.timestamp <= s.end_time]
+        if not in_scene:
+            s.relevance_score = 0.5
+            continue
+        q = float(np.mean([f.visual_quality for f in in_scene]))
+        m = float(np.mean([f.motion_level for f in in_scene]))
+        speech_bonus = 0.1 if audio and audio.has_speech else 0.0
+        s.relevance_score = float(np.clip(0.55 * q + 0.35 * m + speech_bonus, 0.0, 1.0))
+
+    backend = str(cfg("media_analysis.video_moment_backend", "internvideo2")).lower()
+    if backend == "internvideo2":
+        _apply_internvideo2_scene_boost(media_path, scenes)
+
+    return scenes
+
+
+def _apply_internvideo2_scene_boost(media_path: Path, scenes: list[SceneSegment]) -> None:
+    _load_internvideo2()
+    if _internvideo_model is None or _internvideo_processor is None or not scenes:
+        return
+
+    try:
+        # Lightweight boost: compare middle-frame embeddings against generic "highlight" prompts.
+        import torch
+
+        prompt_labels = [
+            "a key highlight moment",
+            "an emotional peak",
+            "a dramatic action moment",
+            "an unimportant filler scene",
+        ]
+        device = _infer_device()
+        midpoint_frames = _extract_scene_midpoint_images(media_path, scenes)
+        if not midpoint_frames:
+            return
+
+        boost_scores = []
+        for img in midpoint_frames:
+            batch = _internvideo_processor(
+                images=img,
+                text=prompt_labels,
+                return_tensors="pt",
+                padding=True,
+            )
+            batch = _move_batch_to_device(batch, device)
+            with torch.no_grad():
+                out = _internvideo_model(**batch)
+                logits = out.logits_per_image[0].detach().float().cpu().numpy()
+
+            pos = float(np.max(logits[:3]))
+            neg = float(logits[3])
+            boost = float(np.clip((pos - neg) / 12.0, -0.15, 0.15))
+            boost_scores.append(boost)
+
+        for i, s in enumerate(scenes):
+            if i < len(boost_scores):
+                s.relevance_score = float(np.clip(s.relevance_score + boost_scores[i], 0.0, 1.0))
+    except Exception as e:
+        log.warning(f"InternVideo2 scene boost failed: {e}")
+
+
+def _extract_scene_midpoint_images(path: Path, scenes: list[SceneSegment]) -> list[Image.Image]:
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return []
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    images: list[Image.Image] = []
+    try:
+        for s in scenes:
+            mid = max(0.0, (s.start_time + s.end_time) / 2.0)
+            idx = int(min(frame_count - 1, max(0, mid * fps)))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if ok:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                images.append(Image.fromarray(rgb))
+    finally:
+        cap.release()
+    return images
+
+
+# ---------------------------------------------------------------------------
 # Audio analysis
 # ---------------------------------------------------------------------------
 
@@ -328,11 +581,24 @@ def _analyze_audio(path: Path) -> Optional[AudioProfile]:
         return _basic_audio_probe(path)
 
     try:
-        import whisper
+        transcript = ""
+        language = "unknown"
 
-        result = _whisper_model.transcribe(str(path), fp16=False)
-        transcript = result.get("text", "").strip()
-        language = result.get("language", "unknown")
+        if _whisper_backend == "faster-whisper":
+            segments, info = _whisper_model.transcribe(
+                str(path),
+                beam_size=int(cfg("media_analysis.whisper_beam_size", 5)),
+                vad_filter=bool(cfg("media_analysis.whisper_vad_filter", True)),
+            )
+            transcript = " ".join(seg.text.strip() for seg in segments).strip()
+            language = getattr(info, "language", "unknown")
+        else:
+            result = _whisper_model.transcribe(
+                str(path),
+                fp16=(_infer_device() == "cuda"),
+            )
+            transcript = result.get("text", "").strip()
+            language = result.get("language", "unknown")
 
         return AudioProfile(
             has_speech=len(transcript) > 10,
@@ -383,6 +649,42 @@ def _get_audio_duration(path: Path) -> float:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _label_candidates() -> tuple[list[str], list[str]]:
+    tag_candidates = [
+        "landscape", "cityscape", "beach", "mountain", "forest", "sunset", "sunrise",
+        "indoor", "outdoor", "people", "crowd", "portrait", "close-up", "wide-shot",
+        "action", "still", "food", "animal", "car", "building", "water", "sky",
+        "night", "day", "celebration", "wedding", "party", "sport", "nature",
+        "technology", "product", "art", "music", "dance", "travel", "work",
+    ]
+    emotion_candidates = [
+        "happy", "calm", "excited", "sad", "dramatic", "peaceful",
+        "energetic", "romantic", "nostalgic", "neutral",
+    ]
+    return tag_candidates, emotion_candidates
+
+
+def _postprocess_label_scores(
+    tag_scores: np.ndarray,
+    emo_scores: np.ndarray,
+    tag_candidates: list[str],
+    emotion_candidates: list[str],
+) -> tuple[list[str], str, float]:
+    top_tag_idx = tag_scores.argsort()[-5:][::-1]
+    top_tags = [tag_candidates[i] for i in top_tag_idx]
+    dominant_emotion = emotion_candidates[int(np.argmax(emo_scores))]
+    quality = float(np.clip(float(np.max(tag_scores)) / 10.0 + 0.5, 0.0, 1.0))
+    return top_tags, dominant_emotion, quality
+
+
+def _calc_motion(img: Image.Image, prev_gray: Optional[np.ndarray]) -> tuple[float, np.ndarray]:
+    gray = np.asarray(img.convert("L"), dtype=np.float32)
+    if prev_gray is None:
+        return 0.0, gray
+    diff = np.mean(np.abs(gray - prev_gray))
+    return float(np.clip(diff / 32.0, 0.0, 1.0)), gray
+
 
 def _aggregate_tags(frames: list[FrameAnalysis]) -> list[str]:
     tag_counts: dict[str, int] = {}

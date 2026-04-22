@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quick check that CLIP + Whisper stack loads (downloads weights on first run)."""
+"""Quick check that vision + Whisper stack loads (downloads weights on first run)."""
 from __future__ import annotations
 
 import sys
@@ -16,17 +16,28 @@ def main() -> int:
     load_config()
     import src.core.media as media
 
-    print("Loading CLIP…")
-    media._load_clip()
-    if media._clip_model is None:
-        print("CLIP failed (install: pip install -r requirements-ml.txt)")
+    backend = str(media.cfg("media_analysis.vision_backend", "open_clip")).lower()
+    if backend == "siglip2":
+        print("Loading SigLIP2…")
+        media._load_siglip2()
+        if media._siglip2_model is None:
+            print("SigLIP2 failed (install/verify: pip install -r requirements-ml.txt)")
+            return 1
+        print("SigLIP2 OK")
+    else:
+        print("Loading OpenCLIP…")
+        media._load_clip()
+        if media._clip_model is None:
+            print("OpenCLIP failed (install: pip install -r requirements-ml.txt)")
+            return 1
+        print("OpenCLIP OK")
+
+    print("Loading Whisper backend…")
+    media._load_whisper()
+    if media._whisper_model is None:
+        print("Whisper failed (install/verify: pip install -r requirements-ml.txt)")
         return 1
-    print("CLIP OK")
-
-    print("Importing Whisper…")
-    import whisper  # noqa: F401
-
-    print("Whisper OK (model downloads on first transcribe)")
+    print(f"Whisper OK (backend={media._whisper_backend})")
     return 0
 
 

@@ -52,6 +52,10 @@ class EditorAgent(BaseAgent):
             self.log.info("[bold magenta]Editor[/] attempting fallback assembly...")
             return self._fallback_assemble(edl, output_path)
 
+    def apply_render_profile(self, profile: dict) -> None:
+        """Apply platform-specific render settings to the assembler."""
+        self.assembler.apply_profile(profile)
+
     def _fallback_assemble(self, edl: EditDecisionList, output_path: Path) -> Path:
         """Simplified assembly: concatenate clips without transitions."""
         from moviepy import VideoFileClip, ImageClip, concatenate_videoclips

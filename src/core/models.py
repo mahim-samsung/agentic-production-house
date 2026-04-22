@@ -148,6 +148,63 @@ class CreativeBrief(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Writer input — pre-validated segment candidates (anti-hallucination)
+# ---------------------------------------------------------------------------
+
+
+class SegmentCandidate(BaseModel):
+    """A single trim window the LLM may select; times are verified against analysis."""
+
+    id: int = Field(description="Stable index passed to the LLM (0..N-1)")
+    source_file: str
+    media_type: MediaType
+    start_time: float = 0.0
+    end_time: float = 0.0
+    image_duration: float = Field(
+        default=0.0,
+        description="For images: on-screen duration in seconds (video uses end-start)",
+    )
+    hint: str = Field(default="", description="Short factual summary for the planner")
+    moment_score: float = Field(default=0.5, ge=0.0, le=1.0, description="Heuristic importance")
+
+
+class ConstrainedPick(BaseModel):
+    """One row in the constrained plan: must reference SegmentCandidate.id."""
+
+    candidate_index: int = Field(ge=0, description="Index into the provided candidate list")
+    speed: float = Field(default=1.0, gt=0.0)
+    transition_in: TransitionType = TransitionType.CUT
+    transition_duration: float = Field(default=0.5, ge=0.0)
+    narrative_role: str = ""
+    text_overlay: str = ""
+    reasoning: str = ""
+
+
+class ConstrainedEditPlan(BaseModel):
+    """LLM output when editing is restricted to enumerated candidates only."""
+
+    title: str
+    picks: list[ConstrainedPick] = Field(default_factory=list)
+    narrative_summary: str = ""
+    audio_plan: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_picks_key(cls, data: Any) -> Any:
+        """Some models emit 'segments' instead of 'picks' for the constrained plan."""
+        if not isinstance(data, dict):
+            return data
+        if "picks" not in data and "segments" in data:
+            segs = data.get("segments")
+            if isinstance(segs, list) and segs and isinstance(segs[0], dict):
+                if "candidate_index" in segs[0]:
+                    out = {k: v for k, v in data.items() if k != "segments"}
+                    out["picks"] = segs
+                    return out
+        return data
+
+
+# ---------------------------------------------------------------------------
 # Writer output — Edit Decision List
 # ---------------------------------------------------------------------------
 
