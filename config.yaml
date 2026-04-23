@@ -39,6 +39,14 @@ media_analysis:
     model_id: "OpenGVLab/InternVideo2_Chat_8B_InternLM2_5"
     enabled: true
 
+  # Optional VLM captions (none | qwen2_5_vl). Adds heavy GPU load when enabled.
+  vlm_semantics_backend: "none"
+  qwen2_5_vl:
+    model_id: "Qwen/Qwen2.5-VL-3B-Instruct"
+    max_new_tokens: 96
+    max_scene_captions: 20
+    max_orphan_frame_captions: 4
+
   # Whisper model size: tiny, base, small, medium, large
   whisper_backend: "faster-whisper"  # faster-whisper | openai-whisper
   whisper_model: "large-v3"
@@ -61,6 +69,9 @@ video:
   max_duration: 90
 
 audio:
+  # Include original clip audio (mic/camera) in the timeline before normalize / BGM.
+  keep_source_audio: false
+
   # Background music volume (0.0 to 1.0) under dialogue/ambient
   music_volume: 0.18
 

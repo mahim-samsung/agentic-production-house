@@ -7,8 +7,9 @@ Uses MoviePy for compositing and transitions, with FFmpeg as the backend.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
+import numpy as np
 from moviepy import (
     AudioFileClip,
     ColorClip,
@@ -20,6 +21,7 @@ from moviepy import (
     vfx,
 )
 from moviepy.audio import fx as afx
+from moviepy.audio.AudioClip import AudioClip
 
 from src.core.models import (
     ClipSegment,
@@ -32,6 +34,30 @@ from src.utils.config import get as cfg
 from src.utils.logger import get_logger
 
 log = get_logger("video")
+
+
+def apply_timeline_audio_policy(final_clip: Any) -> Any:
+    """
+    When ``audio.keep_source_audio`` is false, drop any decoded clip audio and
+    attach a silent stereo bed so later FFmpeg steps always see an audio stream.
+    """
+    keep_src = bool(cfg("audio.keep_source_audio", False))
+    if keep_src:
+        return final_clip
+    dur = getattr(final_clip, "duration", None)
+    if dur is None or dur <= 0:
+        return final_clip
+    if getattr(final_clip, "audio", None) is not None:
+        final_clip = final_clip.without_audio()
+    sr = int(cfg("audio.sample_rate", 44100))
+    silent = AudioClip(
+        lambda t: np.zeros(2, dtype=np.float32),
+        duration=dur,
+        fps=sr,
+    )
+    out = final_clip.with_audio(silent)
+    log.info("Original clip audio omitted; silent timeline (BGM can still be added in audio pass)")
+    return out
 
 
 class VideoAssembler:
@@ -94,6 +120,8 @@ class VideoAssembler:
         else:
             final = concatenate_videoclips(final_clips, method="compose")
 
+        final = apply_timeline_audio_policy(final)
+
         if background_music and background_music.exists():
             final = self._mix_background_music(final, background_music)
 
@@ -123,7 +151,8 @@ class VideoAssembler:
         media_type = classify_media(path)
 
         if media_type == MediaType.VIDEO:
-            clip = VideoFileClip(str(path))
+            keep_src = bool(cfg("audio.keep_source_audio", False))
+            clip = VideoFileClip(str(path), audio=keep_src)
             if seg.end_time > 0 and seg.end_time > seg.start_time:
                 clip = clip.subclipped(seg.start_time, min(seg.end_time, clip.duration))
             elif seg.start_time > 0:

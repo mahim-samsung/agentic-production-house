@@ -54,6 +54,27 @@ export default function AdminPage() {
             <option value="siglip2">siglip2</option>
             <option value="open_clip">open_clip</option>
           </select>
+          <select
+            className={styles.select}
+            style={{ marginTop: "0.65rem" }}
+            value={s.vlmSemanticsBackend}
+            onChange={(e) =>
+              update("vlmSemanticsBackend", e.target.value as AdminSettings["vlmSemanticsBackend"])
+            }
+          >
+            <option value="inherit">VLM semantics · yaml</option>
+            <option value="none">VLM off</option>
+            <option value="qwen2_5_vl">Qwen2.5-VL captions</option>
+          </select>
+          {s.vlmSemanticsBackend === "qwen2_5_vl" && (
+            <input
+              className={styles.input}
+              style={{ marginTop: "0.65rem" }}
+              value={s.qwen25vlModelId}
+              onChange={(e) => update("qwen25vlModelId", e.target.value)}
+              placeholder="Qwen HF model id (optional override)"
+            />
+          )}
         </section>
 
         <section className={styles.card}>

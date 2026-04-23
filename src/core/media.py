@@ -46,6 +46,8 @@ _siglip2_model = None
 _siglip2_processor = None
 _internvideo_model = None
 _internvideo_processor = None
+_qwen25_model = None
+_qwen25_processor = None
 
 
 def _infer_device() -> str:
@@ -188,6 +190,183 @@ def _load_whisper():
         log.warning(f"Failed to load Whisper: {e}")
 
 
+def _load_qwen25_vl():
+    """Lazy-load Qwen2.5-VL when vlm_semantics_backend is qwen2_5_vl."""
+    global _qwen25_model, _qwen25_processor
+    if str(cfg("media_analysis.vlm_semantics_backend", "none")).lower() != "qwen2_5_vl":
+        return
+    if _qwen25_model is not None and _qwen25_processor is not None:
+        return
+
+    try:
+        import torch
+        from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+    except ImportError as e:
+        log.warning(f"Qwen2.5-VL needs transformers with Qwen2_5_VL support: {e}")
+        return
+
+    model_id = str(cfg("media_analysis.qwen2_5_vl.model_id", "")).strip()
+    if not model_id:
+        log.warning("Qwen2.5-VL enabled but media_analysis.qwen2_5_vl.model_id is empty")
+        return
+
+    device = _infer_device()
+    try:
+        import torch
+
+        log.info(f"Loading Qwen2.5-VL {model_id} (device={device})")
+        if device == "cuda":
+            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            try:
+                _qwen25_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    model_id,
+                    torch_dtype=dtype,
+                    device_map="auto",
+                    attn_implementation="sdpa",
+                    trust_remote_code=True,
+                )
+            except (TypeError, ValueError):
+                _qwen25_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                    model_id,
+                    torch_dtype=dtype,
+                    device_map="auto",
+                    trust_remote_code=True,
+                )
+        else:
+            _qwen25_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_id,
+                torch_dtype=torch.float32,
+                device_map=None,
+                trust_remote_code=True,
+            )
+            _qwen25_model = _qwen25_model.to("cpu")
+        _qwen25_processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+        _qwen25_model.eval()
+        log.info("Qwen2.5-VL loaded")
+    except Exception as e:
+        log.warning(f"Qwen2.5-VL load failed: {e}")
+        _qwen25_model = None
+        _qwen25_processor = None
+
+
+def _qwen25_vl_caption_image(image: Image.Image) -> str:
+    """One short caption for a PIL image; empty string on failure."""
+    _load_qwen25_vl()
+    if _qwen25_model is None or _qwen25_processor is None:
+        return ""
+
+    import torch
+
+    user_prompt = str(
+        cfg(
+            "media_analysis.qwen2_5_vl.caption_user_prompt",
+            "In 1–2 short sentences, describe the main subjects, setting, action, and mood "
+            "for a travel or event video editor. No preamble.",
+        )
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": user_prompt},
+            ],
+        }
+    ]
+    try:
+        inputs = _qwen25_processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+    except Exception as e:
+        log.warning(f"Qwen2.5-VL chat template failed: {e}")
+        return ""
+
+    device = next(_qwen25_model.parameters()).device
+    inputs = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in inputs.items()}
+    max_new = int(cfg("media_analysis.qwen2_5_vl.max_new_tokens", 96))
+    try:
+        with torch.inference_mode():
+            gen_ids = _qwen25_model.generate(**inputs, max_new_tokens=max_new)
+    except Exception as e:
+        log.warning(f"Qwen2.5-VL generate failed: {e}")
+        return ""
+
+    in_ids = inputs["input_ids"][0]
+    trimmed = gen_ids[0, in_ids.shape[0] :].detach().cpu()
+    try:
+        decoded = _qwen25_processor.batch_decode(
+            [trimmed],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        text = (decoded[0] if decoded else "").replace("\n", " ").strip()
+    except Exception:
+        tok = getattr(_qwen25_processor, "tokenizer", None)
+        if tok is None:
+            return ""
+        text = tok.decode(trimmed, skip_special_tokens=True).replace("\n", " ").strip()
+    return text[:500]
+
+
+def _maybe_apply_vlm_semantics(
+    path: Path,
+    media_type: MediaType,
+    sampled_frames: list[tuple[float, Image.Image]],
+    frame_analyses: list[FrameAnalysis],
+    scenes: list[SceneSegment],
+) -> None:
+    """Optional Qwen2.5-VL captions layered on SigLIP/OpenCLIP frame tags."""
+    if str(cfg("media_analysis.vlm_semantics_backend", "none")).lower() != "qwen2_5_vl":
+        return
+
+    if media_type == MediaType.VIDEO:
+        max_scenes = int(cfg("media_analysis.qwen2_5_vl.max_scene_captions", 20))
+        max_orphan = int(cfg("media_analysis.qwen2_5_vl.max_orphan_frame_captions", 4))
+
+        if scenes:
+            n = len(scenes)
+            idxs = list(range(n))
+            if n > max_scenes:
+                idxs = sorted(set(np.linspace(0, n - 1, num=max_scenes, dtype=int)))
+            imgs = _extract_scene_midpoint_images(path, scenes)
+            for i in idxs:
+                if i >= len(imgs):
+                    break
+                cap = _qwen25_vl_caption_image(imgs[i])
+                if cap:
+                    scenes[i].description = cap
+            log.info(f"Qwen2.5-VL: captioned {len(idxs)} scene(s) in {path.name}")
+        else:
+            if not sampled_frames or not frame_analyses:
+                return
+            cap_n = min(len(sampled_frames), max_orphan, len(frame_analyses))
+            pick = sorted(set(np.linspace(0, len(sampled_frames) - 1, num=cap_n, dtype=int)))
+            for idx in pick:
+                if idx >= len(sampled_frames) or idx >= len(frame_analyses):
+                    continue
+                _, pil_img = sampled_frames[idx]
+                cap = _qwen25_vl_caption_image(pil_img)
+                if not cap:
+                    continue
+                fa = frame_analyses[idx]
+                prev = (fa.description or "").strip()
+                fa.description = f"{cap} ({prev})" if prev else cap
+            log.info(f"Qwen2.5-VL: captioned {len(pick)} frame(s) (no scenes) in {path.name}")
+
+    elif media_type == MediaType.IMAGE and sampled_frames and frame_analyses:
+        _, pil_img = sampled_frames[0]
+        cap = _qwen25_vl_caption_image(pil_img)
+        if cap:
+            fa = frame_analyses[0]
+            prev = (fa.description or "").strip()
+            fa.description = f"{cap} ({prev})" if prev else cap
+            log.info(f"Qwen2.5-VL: captioned image {path.name}")
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -245,6 +424,7 @@ def _analyze_video(path: Path, file_size_mb: float) -> MediaProfile:
         audio=audio,
         media_path=path,
     )
+    _maybe_apply_vlm_semantics(path, MediaType.VIDEO, sampled_frames, frame_analyses, scenes)
 
     return MediaProfile(
         file_path=str(path),
@@ -267,6 +447,7 @@ def _analyze_image(path: Path, file_size_mb: float) -> MediaProfile:
     width, height = img.size
 
     frame_analyses = _analyze_frames([(0.0, img)])
+    _maybe_apply_vlm_semantics(path, MediaType.IMAGE, [(0.0, img)], frame_analyses, [])
 
     return MediaProfile(
         file_path=str(path),

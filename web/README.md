@@ -1,6 +1,6 @@
 # Web UI
 
-Next.js app: **/** — Produce (media, prompt, platform, output, per-run audio flags). **/admin** — technical defaults (Ollama model & base URL, vision backend, constrained writer, **moment backend** `heuristic` / `internvideo2` + InternVideo2 toggle & model id, optional server path to `config.yaml`). Admin values are stored in **localStorage** and applied to every run. The API forces **`LLM_PROVIDER=ollama`** for jobs from the web UI.
+Next.js app: **/** — Produce (media, prompt, platform, output, per-run audio flags). **/admin** — technical defaults (Ollama model & base URL, vision backend, optional **VLM semantics** `none` / `qwen2_5_vl` + optional Qwen HF model id override, constrained writer, **moment backend** `heuristic` / `internvideo2` + InternVideo2 toggle & model id, optional server path to `config.yaml`). Admin values are stored in **localStorage** and applied to every run. The API forces **`LLM_PROVIDER=ollama`** for jobs from the web UI.
 
 Runs `scripts/web_produce.py` in a background subprocess.
 

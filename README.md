@@ -64,7 +64,7 @@ Open **http://localhost:3000** — **Produce** to run jobs; **Admin** for Ollama
 
 ## Configuration
 
-Defaults live in **`config.yaml`** (LLM, `media_analysis`, `video`, `platforms`, `writer`, MusicGen, paths). Env overrides include `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, `VISION_BACKEND`, `VIDEO_MOMENT_BACKEND`, `INTERNVIDEO2_*`, `WRITER_CONSTRAINED`, `LLM_PROVIDER`, `OPENAI_API_KEY`.
+Defaults live in **`config.yaml`** (LLM, `media_analysis`, `video`, `audio.keep_source_audio` defaults **off**, `platforms`, `writer`, MusicGen, paths). Env overrides include `OLLAMA_MODEL`, `OLLAMA_BASE_URL`, `VISION_BACKEND`, `VLM_SEMANTICS_BACKEND` (`none` \| `qwen2_5_vl`), `QWEN25_VL_MODEL_ID`, `VIDEO_MOMENT_BACKEND`, `INTERNVIDEO2_*`, `WRITER_CONSTRAINED`, `KEEP_SOURCE_AUDIO` (`true` \| `false`), `LLM_PROVIDER`, `OPENAI_API_KEY`. CLI: **`--strip-source-audio`** sets `KEEP_SOURCE_AUDIO=false` for that run.
 
 ---
 

@@ -28,6 +28,7 @@ export default function HomePage() {
   const [outputFilename, setOutputFilename] = useState("");
   const [skipAudio, setSkipAudio] = useState(false);
   const [generateMusic, setGenerateMusic] = useState(false);
+  const [keepSourceAudio, setKeepSourceAudio] = useState(false);
 
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
   const [musicFiles, setMusicFiles] = useState<File[]>([]);
@@ -153,8 +154,13 @@ export default function HomePage() {
     fd.set("outputFilename", outputFilename.trim());
     fd.set("skipAudio", skipAudio ? "true" : "false");
     fd.set("generateMusic", generateMusic ? "true" : "false");
+    fd.set("keepSourceAudio", keepSourceAudio ? "true" : "false");
     fd.set("writerConstrained", a.writerConstrained ? "true" : "false");
     fd.set("visionBackend", a.visionBackend);
+    fd.set("vlmSemanticsBackend", a.vlmSemanticsBackend);
+    if (a.vlmSemanticsBackend === "qwen2_5_vl" && a.qwen25vlModelId.trim()) {
+      fd.set("qwen25vlModelId", a.qwen25vlModelId.trim());
+    }
     if (a.ollamaModel.trim()) fd.set("ollamaModel", a.ollamaModel.trim());
     if (a.ollamaBaseUrl.trim()) fd.set("ollamaBaseUrl", a.ollamaBaseUrl.trim());
     if (a.configServerPath.trim()) fd.set("configServerPath", a.configServerPath.trim());
@@ -258,14 +264,50 @@ export default function HomePage() {
         <section className={styles.card}>
           <div className={styles.row}>
             <label className={styles.check}>
-              <input type="checkbox" checked={skipAudio} onChange={(e) => setSkipAudio(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={skipAudio}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setSkipAudio(v);
+                  if (v) setGenerateMusic(false);
+                }}
+              />
               No audio pass
             </label>
-            <label className={styles.check}>
-              <input type="checkbox" checked={generateMusic} onChange={(e) => setGenerateMusic(e.target.checked)} />
+            <label
+              className={styles.check}
+              style={{ opacity: skipAudio ? 0.55 : 1 }}
+              title={
+                skipAudio
+                  ? "No audio pass skips the whole audio step, so MusicGen cannot run. Turn it off to use MusicGen."
+                  : "When the audio pass runs, try AI background music from the creative brief and your prompt."
+              }
+            >
+              <input
+                type="checkbox"
+                checked={generateMusic}
+                disabled={skipAudio}
+                onChange={(e) => setGenerateMusic(e.target.checked)}
+              />
               MusicGen
             </label>
           </div>
+          <label className={styles.check} style={{ marginTop: "0.65rem", display: "flex" }}>
+            <input
+              type="checkbox"
+              checked={keepSourceAudio}
+              onChange={(e) => setKeepSourceAudio(e.target.checked)}
+            />
+            <span title="When off, clip microphone/camera audio is not used in the edit; BGM can still be added if the audio pass runs.">
+              Keep original clip audio
+            </span>
+          </label>
+          {skipAudio && (
+            <p style={{ margin: "0.55rem 0 0", fontSize: "0.82rem", color: "var(--muted)" }}>
+              No audio pass skips normalize, fades, and all BGM (including MusicGen).
+            </p>
+          )}
         </section>
 
         <div className={styles.actions}>

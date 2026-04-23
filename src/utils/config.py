@@ -60,6 +60,20 @@ def load_config(path: Path | str | None = None) -> dict[str, Any]:
     if (im := os.getenv("INTERNVIDEO2_MODEL_ID")) is not None and im.strip():
         _config.setdefault("media_analysis", {}).setdefault("internvideo2", {})["model_id"] = im.strip()
 
+    if (vlm := os.getenv("VLM_SEMANTICS_BACKEND")) is not None and vlm.strip():
+        _config.setdefault("media_analysis", {})["vlm_semantics_backend"] = vlm.strip().lower()
+
+    if (qm := os.getenv("QWEN25_VL_MODEL_ID")) is not None and qm.strip():
+        _config.setdefault("media_analysis", {}).setdefault("qwen2_5_vl", {})["model_id"] = qm.strip()
+
+    if (ka := os.getenv("KEEP_SOURCE_AUDIO")) is not None:
+        _config.setdefault("audio", {})["keep_source_audio"] = ka.strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+
     return _config
 
 

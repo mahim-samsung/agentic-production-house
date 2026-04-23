@@ -69,7 +69,7 @@ class AnalystAgent(BaseAgent):
             for f in profile.frames[:6]
         )
         scene_desc = "; ".join(
-            f"[{s.start_time:.1f}–{s.end_time:.1f}s]"
+            f"[{s.start_time:.1f}–{s.end_time:.1f}s] {(s.description or '').strip()[:140]}"
             for s in profile.scenes[:10]
         )
         audio_desc = ""

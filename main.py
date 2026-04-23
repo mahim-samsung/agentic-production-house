@@ -75,6 +75,11 @@ Examples:
         help="Synthesize instrumental BGM with MusicGen (needs: pip install -r requirements-musicgen.txt, GPU recommended)",
     )
     parser.add_argument(
+        "--strip-source-audio",
+        action="store_true",
+        help="Do not use original clip audio in the edit; silent timeline (BGM/music pass can still add music)",
+    )
+    parser.add_argument(
         "--platform",
         choices=[
             "tiktok",
@@ -90,6 +95,11 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if args.strip_source_audio:
+        import os
+
+        os.environ["KEEP_SOURCE_AUDIO"] = "false"
 
     # Resolve media source
     media_dir = args.media_dir

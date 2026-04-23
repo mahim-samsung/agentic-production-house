@@ -13,7 +13,7 @@ from typing import Optional
 
 from src.agents.base import BaseAgent
 from src.core.models import EditDecisionList
-from src.core.video import VideoAssembler
+from src.core.video import VideoAssembler, apply_timeline_audio_policy
 
 
 class EditorAgent(BaseAgent):
@@ -61,6 +61,7 @@ class EditorAgent(BaseAgent):
         from moviepy import VideoFileClip, ImageClip, concatenate_videoclips
         from src.core.media import classify_media
         from src.core.models import MediaType
+        from src.utils.config import get as cfg
 
         clips = []
         for seg in edl.segments:
@@ -69,7 +70,8 @@ class EditorAgent(BaseAgent):
                 media_type = classify_media(path)
 
                 if media_type == MediaType.VIDEO:
-                    clip = VideoFileClip(str(path))
+                    keep_src = bool(cfg("audio.keep_source_audio", False))
+                    clip = VideoFileClip(str(path), audio=keep_src)
                     if seg.end_time > 0:
                         clip = clip.subclipped(
                             seg.start_time,
@@ -89,6 +91,7 @@ class EditorAgent(BaseAgent):
             raise RuntimeError("No clips could be loaded even in fallback mode")
 
         final = concatenate_videoclips(clips, method="compose")
+        final = apply_timeline_audio_policy(final)
         final.write_videofile(str(output_path), fps=30, codec="libx264", logger=None)
 
         for c in clips:

@@ -24,9 +24,13 @@ export async function POST(req: Request) {
   const outputFilename = String(form.get("outputFilename") ?? "").trim() || `web-${randomUUID().slice(0, 8)}.mp4`;
   const skipAudio = form.get("skipAudio") === "true" || form.get("skipAudio") === "on";
   const generateMusic = form.get("generateMusic") === "true" || form.get("generateMusic") === "on";
+  const keepSourceAudio =
+    form.get("keepSourceAudio") === "true" || form.get("keepSourceAudio") === "on";
 
   const writerConstrained = form.get("writerConstrained") !== "false";
   const visionBackend = String(form.get("visionBackend") ?? "inherit").trim();
+  const vlmSemanticsBackend = String(form.get("vlmSemanticsBackend") ?? "inherit").trim().toLowerCase();
+  const qwen25vlModelId = String(form.get("qwen25vlModelId") ?? "").trim();
   const ollamaModel = String(form.get("ollamaModel") ?? "").trim();
   const ollamaBaseUrl = String(form.get("ollamaBaseUrl") ?? "").trim();
   const configServerPath = String(form.get("configServerPath") ?? "").trim();
@@ -36,6 +40,10 @@ export async function POST(req: Request) {
 
   if (!["inherit", "heuristic", "internvideo2"].includes(videoMomentBackend)) {
     return Response.json({ error: "Invalid videoMomentBackend." }, { status: 400 });
+  }
+
+  if (!["inherit", "none", "qwen2_5_vl"].includes(vlmSemanticsBackend)) {
+    return Response.json({ error: "Invalid vlmSemanticsBackend." }, { status: 400 });
   }
 
   const mediaEntries = form.getAll("media").filter((v): v is File => v instanceof File);
@@ -90,10 +98,15 @@ export async function POST(req: Request) {
     }
   }
 
-  const env: Record<string, string> = { LLM_PROVIDER: "ollama" };
+  const env: Record<string, string> = {
+    LLM_PROVIDER: "ollama",
+    KEEP_SOURCE_AUDIO: keepSourceAudio ? "true" : "false",
+  };
   if (writerConstrained) env.WRITER_CONSTRAINED = "true";
   else env.WRITER_CONSTRAINED = "false";
   if (visionBackend && visionBackend !== "inherit") env.VISION_BACKEND = visionBackend;
+  if (vlmSemanticsBackend !== "inherit") env.VLM_SEMANTICS_BACKEND = vlmSemanticsBackend;
+  if (vlmSemanticsBackend === "qwen2_5_vl" && qwen25vlModelId) env.QWEN25_VL_MODEL_ID = qwen25vlModelId;
   if (ollamaModel) env.OLLAMA_MODEL = ollamaModel;
   if (ollamaBaseUrl) env.OLLAMA_BASE_URL = ollamaBaseUrl;
 
